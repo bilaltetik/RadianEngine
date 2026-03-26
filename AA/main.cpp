@@ -83,6 +83,8 @@ public:
         renderTargets.resize(3);
     }
 
+    GPUInfo selectedGPU;
+
     bool DevicePrepare() {
         if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)))) return false;
 
@@ -90,6 +92,7 @@ public:
         if (gpus.empty()) return false;
 
         device = CreateDX12Device(gpus[0]); // En yüksek VRAM'li kartı seç
+        selectedGPU = gpus[0];
         if (!device) return false;
 
         commandObjects = CreateCommandObjects(device.Get());
@@ -200,7 +203,7 @@ private:
         for (uint32_t i = 0; factory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter)) != DXGI_ERROR_NOT_FOUND; ++i) {
             DXGI_ADAPTER_DESC1 desc;
             adapter->GetDesc1(&desc);
-            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+            //if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
             gpus.push_back({ desc.Description, desc.DedicatedVideoMemory, adapter });
         }
         return gpus;
@@ -333,8 +336,8 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, PSTR, int) {
             double msPerFrame = 1000.0 / fps;
 
             // Modern std::format ile string oluşturma
-            std::wstring title = std::format(L"{} | FPS: {:.2f} | MS: {:.2f}",
-                    config.title, fps, msPerFrame);
+            std::wstring title = std::format(L"{} | FPS: {:.2f} | MS: {:.2f} | DirectX12 | GPU : {}({}MB)",
+                    config.title, fps, msPerFrame, renderer.selectedGPU.name, renderer.selectedGPU.videoMemory / (1024*1024));
 
             // Pencere başlığını değiştir (Win32 API üzerinden)
             if (i > chunksize) { SetWindowTextW(window.GetHandle(), title.c_str()); i++; }
