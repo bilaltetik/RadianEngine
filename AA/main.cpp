@@ -176,11 +176,11 @@ public:
         commandObjects.list->Barrier(1, &group);
     }
 
-    void EndFrame() {
+    void EndFrame(bool vsync) {
         commandObjects.list->Close();
         ID3D12CommandList* lists[] = { commandObjects.list.Get() };
         commandObjects.queue->ExecuteCommandLists(1, lists);
-        swapChain->Present(1, 0);
+        swapChain->Present(vsync, 0);
         WaitForGPU();
     }
 
@@ -305,8 +305,44 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, PSTR, int) {
     DX12Renderer renderer(&window, config);
     if (!renderer.DevicePrepare() || !renderer.ViewSetup() || !renderer.GraphicLoaderSetup() || !renderer.CreatePSO()) return -1;
 
+    //fps
+    using namespace std::chrono;
+
+    auto lastTime = high_resolution_clock::now();
+    double elapsedTime = 0.0;
+    uint32_t frameCount = 0;
+
+	//gereksiz sys call önlemek için başlık güncelleme sıklığını sınırlayalım(bir işe yaramıyor da olabilir)
+	uint32_t chunksize = 100;
+    uint32_t i = 0;
     while (!window.ShouldClose()) {
+
         window.ProcessMessages();
+        i++;
+        // Zaman farkını hesapla (Delta Time)
+        auto currentTime = high_resolution_clock::now();
+        double deltaTime = duration<double>(currentTime - lastTime).count();
+        lastTime = currentTime;
+
+        elapsedTime += deltaTime;
+        frameCount++;
+
+        // Her 1 saniyede bir başlığı güncelle
+        if (elapsedTime >= 1.0) {
+            double fps = static_cast<double>(frameCount) / elapsedTime;
+            double msPerFrame = 1000.0 / fps;
+
+            // Modern std::format ile string oluşturma
+            std::wstring title = std::format(L"{} | FPS: {:.2f} | MS: {:.2f}",
+                    config.title, fps, msPerFrame);
+
+            // Pencere başlığını değiştir (Win32 API üzerinden)
+            if (i > chunksize) { SetWindowTextW(window.GetHandle(), title.c_str()); i++; }
+
+            // Sayaçları sıfırla
+            frameCount = 0;
+            elapsedTime = 0.0;
+        }
 
         renderer.BeginFrame();
         renderer.ApplyBarrier(true);
@@ -329,7 +365,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, PSTR, int) {
         list->DrawInstanced(3, 1, 0, 0);
 
         renderer.ApplyBarrier(false);
-        renderer.EndFrame();
+        renderer.EndFrame(0);
     }
     return 0;
 }
