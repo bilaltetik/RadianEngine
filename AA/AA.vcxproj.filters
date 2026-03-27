@@ -34,9 +34,4 @@
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="IRenderer.h">
-      <Filter>Üst Bilgi Dosyaları</Filter>
-    </ClInclude>
-  </ItemGroup>
 </Project>

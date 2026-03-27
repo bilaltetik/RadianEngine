@@ -1,7 +1,6 @@
 <Solution>
   <Configurations>
     <Platform Name="x64" />
-    <Platform Name="x86" />
   </Configurations>
   <Project Path="AA/AA.vcxproj" Id="e9820ae1-592d-4034-90ab-e4a2e6dc0b7a" />
   <Project Path="DX12RENDERER/DX12RENDERER.vcxproj" Id="f8a71724-b5c6-4087-a6a5-865f5e57a6ab" />

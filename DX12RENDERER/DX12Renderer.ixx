@@ -1,14 +1,8 @@
-// DX12Renderer.ixx
-// DLL'in birincil modül arayüz birimi (primary module interface unit).
-// DX12Renderer sınıfı bu modülde tanımlanır; dışa aktarılmaz —
-// yalnızca DX12Plugin.cpp (aynı modülün implementation unit'i) kullanır.
-
 module;
 
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3d12.lib")
 
-// --- Global module fragment: modül sisteminin dışındaki başlıklar ---
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -19,25 +13,17 @@ module;
 #include <wrl.h>
 #include <array>
 #include <span>
-#include <IRenderer.h> // paylaşılan arayüz
+#include <IRenderer.h>
+
+#include "Mesh/Vertex.h"
+#include "Material/Texture.h"
+
 
 export module Radian.DX12;
-// "export" edilecek bir şey yok — sınıf modül-internal;
-// fabrika fonksiyonları DX12Plugin.cpp'de extern "C" olarak dışa aktarılır.
-
 import std;
 
 using Microsoft::WRL::ComPtr;
 using namespace Radian::Renderer;
-
-// ====================================================================
-// Veri yapıları
-// ====================================================================
-
-struct Vertex {
-    float pos[3];
-    float col[4];
-};
 
 struct GPUInfo {
     std::wstring          name;
@@ -51,17 +37,8 @@ struct CommandObjects {
     ComPtr<ID3D12GraphicsCommandList10> list;
 };
 
-// ====================================================================
-// DX12Renderer — IRenderer implementasyonu
-// ====================================================================
-
 class DX12Renderer final : public IRenderer {
 public:
-    // -----------------------------------------------------------------
-    // IRenderer::Init
-    // DevicePrepare → ViewSetup → GraphicLoaderSetup → CreatePSO
-    // [C++23] .and_then() zinciri: her adım başarılıysa bir sonrakine geç
-    // -----------------------------------------------------------------
     [[nodiscard]] std::expected<void, std::string>
     Init(const RendererCreateInfo& info) override
     {
@@ -73,9 +50,6 @@ public:
             .and_then([&] { return BuildPSO();            });
     }
 
-    // -----------------------------------------------------------------
-    // IRenderer::RenderFrame — her frame'de main döngüsünden çağrılır
-    // -----------------------------------------------------------------
     void RenderFrame() override {
         BeginFrame();
         ApplyBarrier(true);
@@ -93,17 +67,24 @@ public:
         list->ClearRenderTargetView(rtv, clearCol.data(), 0, nullptr);
 
         list->SetGraphicsRootSignature(m_rootSig.Get());
+
+        list->SetGraphicsRootDescriptorTable(
+            0,
+            diffuse.srvHandle
+        );
+
+        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+        list->SetDescriptorHeaps(1, heaps);
+
+
         list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         list->IASetVertexBuffers(0, 1, &m_vbView);
         list->DrawInstanced(3, 1, 0, 0);
 
         ApplyBarrier(false);
-        EndFrame(/*vsync=*/false);
+        EndFrame(false);
     }
 
-    // -----------------------------------------------------------------
-    // IRenderer::Shutdown — idempotent; destructor da çağırır
-    // -----------------------------------------------------------------
     void Shutdown() override {
         if (m_fenceEvent) {
             WaitForGPU();
@@ -112,9 +93,6 @@ public:
         }
     }
 
-    // -----------------------------------------------------------------
-    // IRenderer sorgulama arayüzü
-    // -----------------------------------------------------------------
     [[nodiscard]] std::wstring_view GetGPUName() const noexcept override {
         return m_gpu.name;
     }
@@ -125,10 +103,6 @@ public:
     ~DX12Renderer() override { Shutdown(); }
 
 private:
-    // -----------------------------------------------------------------
-    // Init aşamaları — her biri std::expected döndürür
-    // -----------------------------------------------------------------
-
     std::expected<void, std::string> DevicePrepare() {
         if (FAILED(CreateDXGIFactory2(0, IID_PPV_ARGS(&m_factory))))
             return std::unexpected("DXGI factory oluşturulamadı");
@@ -159,7 +133,6 @@ private:
         if (!CreateRTV())  return std::unexpected("RTV oluşturulamadı");
         if (!InitSync())   return std::unexpected("Fence/sync nesnesi oluşturulamadı");
 
-        // [C++20] Designated initializers
         m_viewport = {
             .TopLeftX = 0.0f,  .TopLeftY = 0.0f,
             .Width    = static_cast<float>(m_info.width),
@@ -175,44 +148,52 @@ private:
         return PipelineSetup()
             ? std::expected<void, std::string>{}
             : std::unexpected("Root signature oluşturulamadı");
+            
     }
 
     std::expected<void, std::string> GraphicLoaderSetup() {
-        if (!CompileShaderModern(L"common.hlsl", L"VSMain", L"vs_6_0", &m_vsBlob))
+        if (!CompileShaderModern(L"../Bin/common.hlsl", L"VSMain", L"vs_6_0", &m_vsBlob))
             return std::unexpected("Vertex shader derlenemedi");
-        if (!CompileShaderModern(L"common.hlsl", L"PSMain", L"ps_6_0", &m_psBlob))
+        if (!CompileShaderModern(L"../Bin/common.hlsl", L"PSMain", L"ps_6_0", &m_psBlob))
             return std::unexpected("Pixel shader derlenemedi");
 
-        // [C++20] constexpr std::array — CTAD ile tür otomatik çıkarılır
         constexpr std::array triangleVerts = {
-            Vertex{{ 0.0f,  0.5f, 0.0f}, {1.0f, 0.0f, 0.0f, 1.0f}},
-            Vertex{{ 0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f, 1.0f}},
-            Vertex{{-0.5f, -0.5f, 0.0f}, {0.0f, 0.0f, 1.0f, 1.0f}}
+            VertexPosTex{{ 0.0f,  0.5f, 0.0f}, {0.5f, 0.0f}},
+            VertexPosTex{{ 0.5f, -0.5f, 0.0f}, {1.0f, 1.0f}},
+            VertexPosTex{{-0.5f, -0.5f, 0.0f}, {0.0f, 1.0f}}
         };
 
         m_vb = CreateUploadBuffer(sizeof(triangleVerts));
         if (!m_vb) return std::unexpected("Vertex buffer oluşturulamadı");
 
-        // [C++20] std::span — ham pointer + boyut çifti yerine
         UploadToBuffer(m_vb.Get(), std::span{ triangleVerts });
 
         m_vbView = {
             .BufferLocation = m_vb->GetGPUVirtualAddress(),
             .SizeInBytes    = static_cast<UINT>(sizeof(triangleVerts)),
-            .StrideInBytes  = sizeof(Vertex)
+            .StrideInBytes  = sizeof(VertexPosColor)
         };
+
+
+        texLoader.Init(
+            m_device.Get(),
+            m_cmd.queue.Get(),
+            srvHeap.Get(),
+            srvSize
+        );
+
+       /// diffuse = texLoader.Load(L"Texture.bmp", 0);
         return {};
     }
 
     std::expected<void, std::string> BuildPSO() {
-        // [C++20] std::array — _countof() macro'su yok
         constexpr std::array inputDescs = {
-            D3D12_INPUT_ELEMENT_DESC{
+            D3D12_INPUT_ELEMENT_DESC {
                 "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,
                 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
             },
             D3D12_INPUT_ELEMENT_DESC{
-                "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT,
+                "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,
                 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
             }
         };
@@ -235,14 +216,16 @@ private:
             .SampleDesc            = { .Count = 1 }
         };
 
-        if (FAILED(m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso))))
+        ComPtr<ID3DBlob> error;
+
+        HRESULT hr = m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso));
+
+        if (FAILED(hr)) {
+            OutputDebugStringA("PSO FAILED!\n");
             return std::unexpected("PSO oluşturulamadı");
+        }
         return {};
     }
-
-    // -----------------------------------------------------------------
-    // Frame yardımcıları
-    // -----------------------------------------------------------------
 
     void BeginFrame() {
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
@@ -287,10 +270,6 @@ private:
         }
     }
 
-    // -----------------------------------------------------------------
-    // Kurulum yardımcıları
-    // -----------------------------------------------------------------
-
     std::vector<GPUInfo> QueryGPUs() {
         std::vector<GPUInfo> gpus;
         ComPtr<IDXGIAdapter1> adapter;
@@ -314,7 +293,7 @@ private:
     ComPtr<ID3D12Device> CreateDevice(const GPUInfo& gpu) {
         ComPtr<ID3D12Device> d;
 #if defined(_DEBUG)
-        // [C++17] if-init: dbg değişkeni yalnızca if bloğu kapsamında
+       
         if (ComPtr<ID3D12Debug> dbg;
             SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dbg))))
         {
@@ -327,28 +306,26 @@ private:
 
     CommandObjects CreateCommandObjects(ID3D12Device* d) {
         CommandObjects c;
-        const D3D12_COMMAND_QUEUE_DESC qd{ .Type = D3D12_COMMAND_LIST_TYPE_DIRECT }; // [cite: 78]
+        const D3D12_COMMAND_QUEUE_DESC qd{ .Type = D3D12_COMMAND_LIST_TYPE_DIRECT };
 
-        // Her adımda FAILED kontrolü ekliyoruz
         if (FAILED(d->CreateCommandQueue(&qd, IID_PPV_ARGS(&c.queue)))) return {};
         if (FAILED(d->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&c.allocator)))) return {};
 
-        // v0 listesini oluşturup v10'a cast etmek yerine doğrudan v10 istemeyi deneyelim
+        
         HRESULT hr = d->CreateCommandList(
             0,
             D3D12_COMMAND_LIST_TYPE_DIRECT,
             c.allocator.Get(),
             nullptr,
-            IID_PPV_ARGS(&c.list) // Doğrudan ID3D12GraphicsCommandList10 istiyoruz [cite: 25]
+            IID_PPV_ARGS(&c.list)
         );
 
         if (FAILED(hr) || !c.list) {
-            // Eğer v10 başarısızsa, Agility SDK doğru yüklenmemiş demektir.
             OutputDebugStringW(L"KRİTİK HATA: ID3D12GraphicsCommandList10 oluşturulamadı!\n");
             return {};
         }
 
-        c.list->Close(); // Artık güvenle kapatabiliriz 
+        c.list->Close(); 
         return c;
     }
 
@@ -358,14 +335,14 @@ private:
         if (!h) return std::unexpected("Pencere tutamacı (HWND) geçersiz.");
 
         const DXGI_SWAP_CHAIN_DESC1 desc{
-            .Width = w,  // Eski haline aldık
-            .Height = ht, // Eski haline aldık
+            .Width = w,  
+            .Height = ht,
             .Format = DXGI_FORMAT_R8G8B8A8_UNORM,
             .Stereo = FALSE,
             .SampleDesc = {.Count = 1, .Quality = 0 },
             .BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT,
             .BufferCount = 3,
-            .Scaling = DXGI_SCALING_STRETCH, // KRİTİK DÜZELTME: FLIP_DISCARD modeli sadece NONE kabul eder
+            .Scaling = DXGI_SCALING_STRETCH, 
             .SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD,
             .AlphaMode = DXGI_ALPHA_MODE_IGNORE,
             .Flags = 0
@@ -375,7 +352,6 @@ private:
         HRESULT hr = m_factory->CreateSwapChainForHwnd(q, h, &desc, nullptr, nullptr, &s1);
 
         if (FAILED(hr)) {
-            // HRESULT kodunu hex olarak string'e çeviriyoruz
             return std::unexpected(std::format("CreateSwapChainForHwnd başarısız. HRESULT: 0x{:08X}", (uint32_t)hr));
         }
 
@@ -409,19 +385,62 @@ private:
             m_device->CreateRenderTargetView(m_renderTargets[i].Get(), nullptr, h);
             h.Offset(1, m_rtvDescSize);
         }
+
+        D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
+        srvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        srvDesc.NumDescriptors = 1;
+        srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+
+        m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&srvHeap));
+
+        srvSize =
+            m_device->GetDescriptorHandleIncrementSize(
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
+            );
+
         return true;
     }
 
     bool PipelineSetup() {
-        CD3DX12_ROOT_SIGNATURE_DESC rd(
-            0, nullptr, 0, nullptr,
-            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+
+        CD3DX12_DESCRIPTOR_RANGE1 range;
+        range.Init(
+            D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+            1,
+            0
         );
-        ComPtr<ID3DBlob> s, e;
-        D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &s, &e);
-        return SUCCEEDED(m_device->CreateRootSignature(
-            0, s->GetBufferPointer(), s->GetBufferSize(), IID_PPV_ARGS(&m_rootSig)
-        ));
+
+        CD3DX12_ROOT_PARAMETER1 param;
+        param.InitAsDescriptorTable(1, &range, D3D12_SHADER_VISIBILITY_PIXEL);
+
+        CD3DX12_STATIC_SAMPLER_DESC sampler(
+            0,
+            D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+            D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+            D3D12_TEXTURE_ADDRESS_MODE_WRAP
+        );
+
+        D3D12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
+        rsDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
+        rsDesc.Desc_1_1.NumParameters = 1;
+        rsDesc.Desc_1_1.pParameters = &param;
+        rsDesc.Desc_1_1.NumStaticSamplers = 1;
+        rsDesc.Desc_1_1.pStaticSamplers = &sampler;
+        rsDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+
+        ComPtr<ID3DBlob> sig, err;
+
+        D3D12SerializeVersionedRootSignature(&rsDesc, &sig, &err);
+
+        return SUCCEEDED(
+            m_device->CreateRootSignature(
+                0,
+                sig->GetBufferPointer(),
+                sig->GetBufferSize(),
+                IID_PPV_ARGS(&m_rootSig)
+            )
+        );
     }
 
     ComPtr<ID3D12Resource2> CreateUploadBuffer(size_t size) {
@@ -436,16 +455,12 @@ private:
         return r;
     }
 
-    // [C++20] std::span — tip-güvenli, boyut otomatik
-    void UploadToBuffer(ID3D12Resource2* resource, std::span<const Vertex> data) {
+    void UploadToBuffer(ID3D12Resource2* resource, std::span<const VertexPosTex> data) {
         void* ptr = nullptr;
         resource->Map(0, nullptr, &ptr);
         std::memcpy(ptr, data.data(), data.size_bytes());
         resource->Unmap(0, nullptr);
     }
-
-    //
-    // 
 
     bool CompileShaderModern(LPCWSTR file, LPCWSTR entry, LPCWSTR target, ID3DBlob** outBlob) {
         ComPtr<IDxcUtils>    utils;
@@ -462,7 +477,6 @@ private:
             .Encoding = DXC_CP_UTF8
         };
 
-        // [C++20] std::array — boyutu sabit, heap alloc yok
         std::array<LPCWSTR, 6> args{ file, L"-E", entry, L"-T", target, L"-Zi" };
 
         ComPtr<IDxcResult> result;
@@ -479,14 +493,10 @@ private:
         {
             OutputDebugStringA(errors->GetStringPointer());
         }
-
         result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(reinterpret_cast<IDxcBlob**>(outBlob)), nullptr);
         return true;
     }
 
-    // -----------------------------------------------------------------
-    // Üye değişkenler
-    // -----------------------------------------------------------------
     RendererCreateInfo      m_info{};
     GPUInfo                 m_gpu{};
 
@@ -514,4 +524,11 @@ private:
 
     D3D12_VIEWPORT  m_viewport{};
     D3D12_RECT      m_scissor{};
+
+    ComPtr<ID3D12DescriptorHeap> srvHeap;
+    UINT srvSize;
+
+    WICTextureLoaderDX12 texLoader;
+    WICTextureLoaderDX12::Texture diffuse;
+
 };
