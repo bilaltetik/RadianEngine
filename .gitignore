@@ -1,14 +1,50 @@
-# Visual Studio
+# ==========================================
+# Visual Studio / IDE Dosyaları
+# ==========================================
 .vs/
-bin/
-obj/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
 *.sln.DotSettings.user
-Debug/
-Release/
+
+# ==========================================
+# Derleme Klasörleri (Tüm alt projeler için)
+# ==========================================
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Rr]elease/
 x64/
+x86/
 
-
-# Build sonuçları
+# ==========================================
+# Derleme Çıktıları ve Önbellek Dosyaları
+# ==========================================
 *.exe
+*.dll
 *.lib
-*.obj
+*.exp
+*.ilk
+*.pdb
+*.idb
+*.tlog
+*.lastbuildstate
+*.log
+*.iobj
+*.ipdb
+*.pch
+*.res
+
+# ==========================================
+# İSTİSNALAR (Zorunlu SDK ve Kütüphaneler)
+# ==========================================
+# Not: *.dll engellendiği için dışarıdan eklediğin Agility SDK 
+# ve DXC derleyicisi GitHub'a gitmez. Onları depoya dahil etmek için 
+# aşağıdaki satırları kendi klasör yapına göre uyarlayıp başındaki '#' işaretini kaldır:
+
+# !D3D12/D3D12Core.dll
+# !D3D12/d3d12SDKLayers.dll
+# !dxcompiler.dll
+# !dxil.dll

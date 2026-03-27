@@ -7,33 +7,45 @@ export module Radian.Platform;
 import std;
 
 export namespace Radian::Platform {
+
     struct WindowConfig {
         std::uint32_t width{ 1280 };
         std::uint32_t height{ 720 };
-        std::wstring title{ L"Radian Engine" };
+        std::wstring  title{ L"Radian Engine" };
     };
 
     class Window {
     public:
-        bool Create(const WindowConfig& config) {
+        // [C++20] [[nodiscard]] — dönüş değeri yok sayılamaz, hata sessizce geçemez
+        [[nodiscard]] bool Create(const WindowConfig& config) {
             HINSTANCE hInst = GetModuleHandle(nullptr);
 
-            WNDCLASSEX wc = {};
-            wc.cbSize = sizeof(WNDCLASSEX);
-            wc.style = CS_HREDRAW | CS_VREDRAW;
-            wc.lpfnWndProc = WindowProc; // Statik fonksiyona bağladık
-            wc.hInstance = hInst;
-            wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-            wc.lpszClassName = L"RadianWindowClass";
+            // [C++20] Designated initializers — hangi alanın ne olduğu okunuyor,
+            //         magic positional sıralaması yok
+            WNDCLASSEXW wc{
+                .cbSize = sizeof(WNDCLASSEXW),
+                .style = CS_HREDRAW | CS_VREDRAW,
+                .lpfnWndProc = WindowProc,
+                .hInstance = hInst,
+                .hCursor = LoadCursor(nullptr, IDC_ARROW),
+                .lpszClassName = L"RadianWindowClass"
+            };
 
-            if (!RegisterClassEx(&wc)) return false;
+            if (!RegisterClassExW(&wc)) return false;
 
-            m_hwnd = CreateWindowEx(
-                0, L"RadianWindowClass", config.title.c_str(),
+            // CreateWindowExW'ye `this` gönderiyoruz (lpCreateParams),
+            // böylece WindowProc içinde instance'a erişebiliyoruz —
+            // artık inline static hack'e gerek yok
+            m_hwnd = CreateWindowExW(
+                0,
+                L"RadianWindowClass",
+                config.title.c_str(),
                 WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT, CW_USEDEFAULT,
-                config.width, config.height,
-                nullptr, nullptr, hInst, nullptr
+                static_cast<int>(config.width),
+                static_cast<int>(config.height),
+                nullptr, nullptr, hInst,
+                this    // <-- burası kritik
             );
 
             if (!m_hwnd) return false;
@@ -43,28 +55,54 @@ export namespace Radian::Platform {
         }
 
         void ProcessMessages() {
-            MSG msg = {};
-            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            MSG msg{};  // [C++20] = {} yerine doğrudan {} value-init
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
                 TranslateMessage(&msg);
-                DispatchMessage(&msg);
+                DispatchMessageW(&msg);
             }
         }
 
-        bool ShouldClose() const { return m_shouldClose; }
-        HWND GetHandle() const { return m_hwnd; }
+        // [C++20] [[nodiscard]] + noexcept — saf sorgulama fonksiyonu
+        [[nodiscard]] bool ShouldClose() const noexcept {
+            // [C++20] std::atomic<bool>::load — acquire semantiği ile thread-safe okuma
+            return m_shouldClose.load(std::memory_order_acquire);
+        }
+
+        [[nodiscard]] HWND GetHandle() const noexcept { return m_hwnd; }
 
     private:
-        // ÖNEMLİ: WindowProc gövdesi m_shouldClose'u değiştirebilmeli
         static LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-            if (uMsg == WM_DESTROY || uMsg == WM_CLOSE) {
-                m_shouldClose = true;
-                PostQuitMessage(0);
-                return 0;
+            Window* self = nullptr;
+
+            if (uMsg == WM_NCCREATE) {
+                // Pencere ilk oluşturulurken this pointer'ı GWLP_USERDATA'ya göm
+                auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+                self = static_cast<Window*>(cs->lpCreateParams);
+                SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
             }
-            return DefWindowProc(hwnd, uMsg, wParam, lParam);
+            else {
+                self = reinterpret_cast<Window*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+            }
+
+            if (self) {
+                // [C++23] [[likely]] / [[unlikely]] — branch-predictor hint
+                if (uMsg == WM_DESTROY || uMsg == WM_CLOSE) [[unlikely]] {
+                    // [C++20] atomic release store — thread-safe yazma
+                    self->m_shouldClose.store(true, std::memory_order_release);
+                    PostQuitMessage(0);
+                    return 0;
+                }
+            }
+
+            return DefWindowProcW(hwnd, uMsg, wParam, lParam);
         }
 
         HWND m_hwnd{ nullptr };
-        inline static bool m_shouldClose{ false }; // 'inline static' sayesinde her yerden erişilir
+
+        // [C++20] std::atomic<bool> — inline static bool'dan daha güvenli:
+        //   (1) thread-safe, (2) her Window instance'ına özel (static değil),
+        //   (3) derleyici reorder edemez
+        std::atomic<bool> m_shouldClose{ false };
     };
-}
+
+} // namespace Radian::Platform
