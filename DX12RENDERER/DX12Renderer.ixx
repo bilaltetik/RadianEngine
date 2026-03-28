@@ -24,7 +24,7 @@ module;
 #include "Utilities/ShaderCompiler.h"
 #include "Utilities/PipelineState.h"
 #include "Utilities/ConstantBuffer.h"
-
+    
 export module Radian.DX12;
 import std;
 

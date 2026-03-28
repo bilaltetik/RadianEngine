@@ -19,12 +19,12 @@
     <ClCompile Include="Platform\Window.ixx" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="packages.config" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="..\DX12RENDERER\DX12RENDERER.vcxproj">
       <Project>{f8a71724-b5c6-4087-a6a5-865f5e57a6ab}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
