@@ -124,10 +124,9 @@ private:
         if (!m_device)
             return std::unexpected("D3D12 device oluşturulamadı");
 
-        CommandObjects c;
-        c.queue = D3D12CoreHelper::CreateCommandQueue(m_device.Get());
-        c.allocator = D3D12CoreHelper::CreateCommandAllocator(m_device.Get());
-        c.list = D3D12CoreHelper::CreateGraphicsCommandList(m_device.Get(), c.allocator.Get());
+        m_cmd.queue = D3D12CoreHelper::CreateCommandQueue(m_device.Get());
+        m_cmd.allocator = D3D12CoreHelper::CreateCommandAllocator(m_device.Get());
+        m_cmd.list = D3D12CoreHelper::CreateGraphicsCommandList(m_device.Get(), m_cmd.allocator.Get());
 
         return {};
     }

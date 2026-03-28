@@ -72,7 +72,7 @@ public:
         ComPtr<ID3D12CommandQueue> queue;
         D3D12_COMMAND_QUEUE_DESC qd{ .Type = D3D12_COMMAND_LIST_TYPE_DIRECT };
 
-        if (FAILED(device->CreateCommandQueue(&qd, IID_PPV_ARGS(&queue)))) return nullptr;
+        HR_ASSERT(device->CreateCommandQueue(&qd, IID_PPV_ARGS(&queue)));
 
         return queue;
 
