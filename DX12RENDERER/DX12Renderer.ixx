@@ -68,14 +68,13 @@ public:
 
         list->SetGraphicsRootSignature(m_rootSig.Get());
 
+        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+        list->SetDescriptorHeaps(1, heaps);
+
         list->SetGraphicsRootDescriptorTable(
             0,
             diffuse.srvHandle
         );
-
-        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
-        list->SetDescriptorHeaps(1, heaps);
-
 
         list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         list->IASetVertexBuffers(0, 1, &m_vbView);
@@ -171,7 +170,7 @@ private:
         m_vbView = {
             .BufferLocation = m_vb->GetGPUVirtualAddress(),
             .SizeInBytes    = static_cast<UINT>(sizeof(triangleVerts)),
-            .StrideInBytes  = sizeof(VertexPosColor)
+            .StrideInBytes  = sizeof(VertexPosTex)
         };
 
 
@@ -182,7 +181,7 @@ private:
             srvSize
         );
 
-       /// diffuse = texLoader.Load(L"Texture.bmp", 0);
+       diffuse = texLoader.Load(L"Tex.jpg", 0);
         return {};
     }
 

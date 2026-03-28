@@ -1,6 +1,3 @@
-# ==========================================
-# Visual Studio / IDE Dosyaları
-# ==========================================
 .vs/
 *.user
 *.userosscache
@@ -9,9 +6,7 @@
 *.sln.DotSettings.user
 packages/
 
-# ==========================================
-# Derleme Klasörleri (Tüm alt projeler için)
-# ==========================================
+
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
@@ -20,12 +15,7 @@ packages/
 x64/
 x86/
 
-# ==========================================
-# Derleme Çıktıları ve Önbellek Dosyaları
-# ==========================================
 *.exe
-*.dll
-*.lib
 *.exp
 *.ilk
 *.pdb
@@ -37,15 +27,3 @@ x86/
 *.ipdb
 *.pch
 *.res
-
-# ==========================================
-# İSTİSNALAR (Zorunlu SDK ve Kütüphaneler)
-# ==========================================
-# Not: *.dll engellendiği için dışarıdan eklediğin Agility SDK 
-# ve DXC derleyicisi GitHub'a gitmez. Onları depoya dahil etmek için 
-# aşağıdaki satırları kendi klasör yapına göre uyarlayıp başındaki '#' işaretini kaldır:
-
-# !D3D12/D3D12Core.dll
-# !D3D12/d3d12SDKLayers.dll
-# !dxcompiler.dll
-# !dxil.dll
