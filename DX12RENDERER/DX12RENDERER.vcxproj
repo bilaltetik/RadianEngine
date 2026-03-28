@@ -14,15 +14,20 @@
   <ItemGroup>
     <ClCompile Include="DX12Plugin.cpp" />
     <ClCompile Include="DX12Renderer.ixx" />
+    <ClCompile Include="Utilities\ConstantBuffer.h" />
+    <ClCompile Include="Utilities\DescriptorHeapAllocator.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Material\Texture.h" />
-    <ClInclude Include="Mesh\Vertex.h" />
+    <ClInclude Include="Components\Texture.h" />
+    <ClInclude Include="Components\Vertex.h" />
     <ClInclude Include="Utilities\Assert.h" />
+    <ClInclude Include="Utilities\Buffer.h" />
     <ClInclude Include="Utilities\D3D12CoreHelper.h" />
+    <ClInclude Include="Utilities\PipelineState.h" />
+    <ClInclude Include="Utilities\ShaderCompiler.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>

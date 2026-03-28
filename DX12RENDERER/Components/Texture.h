@@ -2,6 +2,8 @@
 #include <ResourceUploadBatch.h>
 #include <wrl.h>
 
+#include "../Utilities/DescriptorHeapAllocator.h"
+
 using Microsoft::WRL::ComPtr;
 
 class WICTextureLoaderDX12 {
@@ -15,15 +17,17 @@ public:
         ID3D12Device* device,
         ID3D12CommandQueue* queue,
         ID3D12DescriptorHeap* srvHeap,
-        UINT descriptorSize
+        UINT descriptorSize,
+        DescriptorHeapAllocator* allocator  
     ) {
         m_device = device;
         m_queue = queue;
         m_srvHeap = srvHeap;
         m_descriptorSize = descriptorSize;
+        m_allocator = allocator;       
     }
 
-    Texture Load(const std::wstring& path, UINT index = 0) {
+    Texture Load(const std::wstring& path) {
         Texture tex;
 
         DirectX::ResourceUploadBatch uploadBatch(m_device);
@@ -36,12 +40,14 @@ public:
             &tex.resource
         );
 
-        auto finish = uploadBatch.End(m_queue);
-        finish.wait();
+        uploadBatch.End(m_queue).wait();
 
-        tex.srvHandle = CreateSRV(tex.resource.Get(), index);
+        UINT slot = m_allocator->AllocateOrReuse();
+        tex.srvHandle = CreateSRV(tex.resource.Get(), slot);
         return tex;
     }
+private:
+    DescriptorHeapAllocator* m_allocator = nullptr;
 
 private:
     D3D12_GPU_DESCRIPTOR_HANDLE CreateSRV(ID3D12Resource* texture, UINT index) {

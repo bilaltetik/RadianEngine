@@ -17,11 +17,22 @@ module;
 
 #include "Utilities/D3D12CoreHelper.h"
 
-#include "Mesh/Vertex.h"
-#include "Material/Texture.h"
+#include "Components/Vertex.h"
+#include "Components/Texture.h"
+
+#include "Utilities/Buffer.h"
+#include "Utilities/ShaderCompiler.h"
+#include "Utilities/PipelineState.h"
+#include "Utilities/ConstantBuffer.h"
 
 export module Radian.DX12;
 import std;
+
+struct alignas(256) TransformData {
+    DirectX::XMFLOAT4X4 world;
+    DirectX::XMFLOAT4X4 view;
+    DirectX::XMFLOAT4X4 projection;
+};
 
 using Microsoft::WRL::ComPtr;
 using namespace Radian::Renderer;
@@ -37,19 +48,19 @@ public:
     [[nodiscard]] std::expected<void, std::string>
     Init(const RendererCreateInfo& info) override
     {
-        m_info = info;  // HWND + boyutları sakla
+        m_info = info;
 
-        return PrepareDevice()
-            .and_then([&] { return ViewSetup();           })
-            .and_then([&] { return GraphicLoaderSetup();  })
-            .and_then([&] { return BuildPSO();            });
+        PrepareDevice();
+        ViewSetup();     
+        GraphicLoaderSetup();
+		m_pso = PipelineState::Create(m_device.Get(), m_rootSig.Get(), IE_POS_TEX, 2, m_vsBlob.Get(), m_psBlob.Get(), D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+        return {};
     }
 
     void BeginFrame() {
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
         m_cmd.allocator->Reset();
         m_cmd.list->Reset(m_cmd.allocator.Get(), m_pso.Get());
-        rtvHeap = rtv.m_heap;
     }
 
     void RenderFrame() override {
@@ -64,19 +75,43 @@ public:
         rtvHandle.ptr += static_cast<SIZE_T>(m_frameIndex) * rtv.m_size;
         list->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
-        // [C++20] constexpr std::array — magic C dizisi yok
         constexpr std::array<float, 4> clearCol{ 0.05f, 0.05f, 0.15f, 1.0f };
         list->ClearRenderTargetView(rtvHandle, clearCol.data(), 0, nullptr);
 
         list->SetGraphicsRootSignature(m_rootSig.Get());
 
-        ID3D12DescriptorHeap* heaps[] = { srvHeap.Get() };
+        TransformData transform{};
+
+        DirectX::XMStoreFloat4x4(&transform.world,
+            DirectX::XMMatrixTranspose(
+                DirectX::XMMatrixIdentity()
+            ));
+
+        DirectX::XMStoreFloat4x4(&transform.view,
+            DirectX::XMMatrixTranspose(
+                DirectX::XMMatrixLookAtLH(
+                    DirectX::XMVectorSet(0, 0, -3, 1),
+                    DirectX::XMVectorSet(0, 0, 0, 1),
+                    DirectX::XMVectorSet(0, 1, 0, 0)
+                )
+            ));
+
+        DirectX::XMStoreFloat4x4(&transform.projection,
+            DirectX::XMMatrixTranspose(
+                DirectX::XMMatrixPerspectiveFovLH(
+                    DirectX::XMConvertToRadians(60.0f),
+                    static_cast<float>(m_info.width) / m_info.height,
+                    0.1f, 1000.0f
+                )
+            ));
+
+        m_transformBuffer.Update(m_frameIndex, transform);
+
+        ID3D12DescriptorHeap* heaps[] = { m_srvAllocator.GetHeap() };
         list->SetDescriptorHeaps(1, heaps);
 
-        list->SetGraphicsRootDescriptorTable(
-            0,
-            diffuse.srvHandle
-        );
+        list->SetGraphicsRootDescriptorTable(0, diffuse.srvHandle);
+        list->SetGraphicsRootDescriptorTable(1, m_transformBuffer.GetGPUHandle(m_frameIndex));
 
         list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         list->IASetVertexBuffers(0, 1, &m_vbView);
@@ -114,6 +149,13 @@ public:
     }
 
 private:
+
+    static DX12Renderer* Get()
+    {
+        static DX12Renderer r;
+        return &r;
+    }
+
     std::expected<void, std::string> PrepareDevice() {
 
         m_factory = D3D12CoreHelper::CreateFactory();
@@ -132,7 +174,8 @@ private:
     }
 
     bool CreateRTV() {
-        rtv = D3D12CoreHelper::CreateDescriptorHeap(m_device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 3);
+        rtv = D3D12CoreHelper::CreateDescriptorHeap(
+            m_device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 3);
 
         CD3DX12_CPU_DESCRIPTOR_HANDLE h(rtv.m_heap->GetCPUDescriptorHandleForHeapStart());
         m_renderTargets.resize(3);
@@ -142,17 +185,7 @@ private:
             h.Offset(1, rtv.m_size);
         }
 
-        D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
-        srvDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        srvDesc.NumDescriptors = 1;
-        srvDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-
-        m_device->CreateDescriptorHeap(&srvDesc, IID_PPV_ARGS(&srvHeap));
-
-        srvSize =
-            m_device->GetDescriptorHandleIncrementSize(
-                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-            );
+        m_srvAllocator.Init(m_device.Get(), 64);
 
         return true;
     }
@@ -183,68 +216,22 @@ private:
             
     }
 
-    std::expected<void, std::string> BuildPSO() {
-        constexpr std::array inputDescs = {
-            D3D12_INPUT_ELEMENT_DESC {
-                "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,
-                0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            },
-            D3D12_INPUT_ELEMENT_DESC{
-                "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,
-                0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0
-            }
-        };
-
-        const D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{
-            .pRootSignature = m_rootSig.Get(),
-            .VS = { m_vsBlob->GetBufferPointer(), m_vsBlob->GetBufferSize() },
-            .PS = { m_psBlob->GetBufferPointer(), m_psBlob->GetBufferSize() },
-            .BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT),
-            .SampleMask = UINT_MAX,
-            .RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT),
-            .DepthStencilState = {.DepthEnable = FALSE },
-            .InputLayout = {
-                inputDescs.data(),
-                static_cast<UINT>(inputDescs.size())
-            },
-            .PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
-            .NumRenderTargets = 1,
-            .RTVFormats = { DXGI_FORMAT_R8G8B8A8_UNORM },
-            .SampleDesc = {.Count = 1 }
-        };
-
-        ComPtr<ID3DBlob> error;
-
-        HRESULT hr = m_device->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&m_pso));
-
-        if (FAILED(hr)) {
-            OutputDebugStringA("PSO FAILED!\n");
-            return std::unexpected("PSO oluşturulamadı");
-        }
-        return {};
-    }
-
     std::expected<void, std::string> GraphicLoaderSetup() {
-        if (!CompileShaderModern(L"common.hlsl", L"VSMain", L"vs_6_0", &m_vsBlob))
-            return std::unexpected("Vertex shader derlenemedi");
-        if (!CompileShaderModern(L"common.hlsl", L"PSMain", L"ps_6_0", &m_psBlob))
-            return std::unexpected("Pixel shader derlenemedi");
+        m_vsBlob = ShaderCompiler::Compile(L"common.hlsl", L"VSMain", L"vs_6_0");
+        m_psBlob = ShaderCompiler::Compile(L"common.hlsl", L"PSMain", L"ps_6_0");
 
-        constexpr std::array triangleVerts = {
-            // Üst sol üçgen
+
+        VertexPosTex triangleVerts[6] = {
             VertexPosTex{{-0.5f,  0.5f, 0.0f}, {0.0f, 0.0f}},
             VertexPosTex{{ 0.5f,  0.5f, 0.0f}, {1.0f, 0.0f}},
             VertexPosTex{{-0.5f, -0.5f, 0.0f}, {0.0f, 1.0f}},
-            // Alt sağ üçgen
             VertexPosTex{{ 0.5f,  0.5f, 0.0f}, {1.0f, 0.0f}},
             VertexPosTex{{ 0.5f, -0.5f, 0.0f}, {1.0f, 1.0f}},
             VertexPosTex{{-0.5f, -0.5f, 0.0f}, {0.0f, 1.0f}},
         };
 
-        m_vb = CreateUploadBuffer(sizeof(triangleVerts));
-        if (!m_vb) return std::unexpected("Vertex buffer oluşturulamadı");
-
-        UploadToBuffer(m_vb.Get(), std::span{ triangleVerts });
+        m_vb = Buffer::Create(m_device.Get(), sizeof(triangleVerts));
+        Buffer::Upload(m_vb.Get(), triangleVerts, sizeof(triangleVerts));
 
         m_vbView = {
             .BufferLocation = m_vb->GetGPUVirtualAddress(),
@@ -252,17 +239,10 @@ private:
             .StrideInBytes  = sizeof(VertexPosTex)
         };
 
+        texLoader.Init(m_device.Get(), m_cmd.queue.Get(), m_srvAllocator.GetHeap(), m_srvAllocator.GetIncrementSize(), &m_srvAllocator); 
+        diffuse = texLoader.Load(L"Texture.bmp");
 
-        texLoader.Init(
-            m_device.Get(),
-            m_cmd.queue.Get(),
-            srvHeap.Get(),
-            srvSize
-        );
-
-       diffuse = texLoader.Load(L"Texture.bmp", 0);
-
-       rtvSize = rtv.m_size;
+       m_transformBuffer.Init(m_device.Get(), &m_srvAllocator, 3);
         return {};
     }
 
@@ -322,15 +302,13 @@ private:
 
     bool PipelineSetup() {
 
-        CD3DX12_DESCRIPTOR_RANGE1 range;
-        range.Init(
-            D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-            1,
-            0
-        );
+        CD3DX12_DESCRIPTOR_RANGE1 srvRange, cbvRange;
+        srvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+        cbvRange.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 1, 0);
 
-        CD3DX12_ROOT_PARAMETER1 param;
-        param.InitAsDescriptorTable(1, &range, D3D12_SHADER_VISIBILITY_PIXEL);
+        CD3DX12_ROOT_PARAMETER1 params[2];
+        params[0].InitAsDescriptorTable(1, &srvRange, D3D12_SHADER_VISIBILITY_PIXEL);
+        params[1].InitAsDescriptorTable(1, &cbvRange, D3D12_SHADER_VISIBILITY_VERTEX);
 
         CD3DX12_STATIC_SAMPLER_DESC sampler(
             0,
@@ -342,8 +320,8 @@ private:
 
         D3D12_VERSIONED_ROOT_SIGNATURE_DESC rsDesc{};
         rsDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1_1;
-        rsDesc.Desc_1_1.NumParameters = 1;
-        rsDesc.Desc_1_1.pParameters = &param;
+        rsDesc.Desc_1_1.NumParameters = 2;
+        rsDesc.Desc_1_1.pParameters = params;
         rsDesc.Desc_1_1.NumStaticSamplers = 1;
         rsDesc.Desc_1_1.pStaticSamplers = &sampler;
         rsDesc.Desc_1_1.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
@@ -362,59 +340,8 @@ private:
         );
     }
 
-    ComPtr<ID3D12Resource2> CreateUploadBuffer(size_t size) {
-        ComPtr<ID3D12Resource2> r;
-        const auto hp = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-        const auto rd = CD3DX12_RESOURCE_DESC::Buffer(size);
-        m_device->CreateCommittedResource(
-            &hp, D3D12_HEAP_FLAG_NONE, &rd,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-            IID_PPV_ARGS(&r)
-        );
-        return r;
-    }
-
-    void UploadToBuffer(ID3D12Resource2* resource, std::span<const VertexPosTex> data) {
-        void* ptr = nullptr;
-        resource->Map(0, nullptr, &ptr);
-        std::memcpy(ptr, data.data(), data.size_bytes());
-        resource->Unmap(0, nullptr);
-    }
-
-    bool CompileShaderModern(LPCWSTR file, LPCWSTR entry, LPCWSTR target, ID3DBlob** outBlob) {
-        ComPtr<IDxcUtils>    utils;
-        ComPtr<IDxcCompiler3> compiler;
-        DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils));
-        DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler));
-
-        ComPtr<IDxcBlobEncoding> src;
-        if (FAILED(utils->LoadFile(file, nullptr, &src))) return false;
-
-        const DxcBuffer buf{
-            .Ptr = src->GetBufferPointer(),
-            .Size = src->GetBufferSize(),
-            .Encoding = DXC_CP_UTF8
-        };
-
-        std::array<LPCWSTR, 6> args{ file, L"-E", entry, L"-T", target, L"-Zi" };
-
-        ComPtr<IDxcResult> result;
-        compiler->Compile(
-            &buf,
-            args.data(), static_cast<UINT32>(args.size()),
-            nullptr,
-            IID_PPV_ARGS(&result)
-        );
-
-        if (ComPtr<IDxcBlobUtf8> errors;
-            SUCCEEDED(result->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr))
-            && errors && errors->GetStringLength() > 0)
-        {
-            OutputDebugStringA(errors->GetStringPointer());
-        }
-        result->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(reinterpret_cast<IDxcBlob**>(outBlob)), nullptr);
-        return true;
-    }
+	DescriptorHeapAllocator m_srvAllocator;
+    ConstantBuffer<TransformData> m_transformBuffer;
 
     RendererCreateInfo      m_info{}; //
     GPUInfo                 m_gpu{}; //
@@ -425,9 +352,7 @@ private:
 
     ComPtr<IDXGISwapChain3>             m_swapChain; //
 
-    UINT rtvSize;
     DescriptorHeap rtv; //
-    ComPtr<ID3D12DescriptorHeap> rtvHeap; 
 
     std::vector<ComPtr<ID3D12Resource>> m_renderTargets;
     UINT                                m_frameIndex  = 0;
@@ -446,9 +371,6 @@ private:
 
     D3D12_VIEWPORT  m_viewport{};
     D3D12_RECT      m_scissor{};
-
-    ComPtr<ID3D12DescriptorHeap> srvHeap;
-    UINT srvSize;
 
     WICTextureLoaderDX12 texLoader;
     WICTextureLoaderDX12::Texture diffuse;
