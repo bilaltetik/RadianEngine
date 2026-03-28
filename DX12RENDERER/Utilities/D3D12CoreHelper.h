@@ -9,15 +9,15 @@
 using Microsoft::WRL::ComPtr;
 
 struct GPUInfo {
-    std::wstring          name;
-    size_t                videoMemory = 0;
-    ComPtr<IDXGIAdapter1> adapter;
+    std::wstring          m_name;
+    size_t                m_videoMemory = 0;
+    ComPtr<IDXGIAdapter1> m_adapter;
 };
 
 struct DescriptorHeap
 {
-    ComPtr<ID3D12DescriptorHeap>        heap;
-    UINT                                size = 0;
+    ComPtr<ID3D12DescriptorHeap>        m_heap;
+    UINT                                m_size = 0;
 };
 
 class D3D12CoreHelper
@@ -45,9 +45,9 @@ public:
             DXGI_ADAPTER_DESC1 desc{};
             adapter->GetDesc1(&desc);
             gpus.emplace_back(GPUInfo{
-                .name = desc.Description,
-                .videoMemory = desc.DedicatedVideoMemory,
-                .adapter = adapter
+                .m_name = desc.Description,
+                .m_videoMemory = desc.DedicatedVideoMemory,
+                .m_adapter = adapter
                 });
         }
         return gpus;
@@ -63,7 +63,7 @@ public:
             dbg->EnableDebugLayer();
         }
 #endif
-        D3D12CreateDevice(gpu.adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d));
+        D3D12CreateDevice(gpu.m_adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d));
         return d;
     }
 
@@ -125,8 +125,8 @@ public:
             .Type = type,
             .NumDescriptors = numDescriptors
         };
-        device->CreateDescriptorHeap(&dhd, IID_PPV_ARGS(&dh.heap));
-        dh.size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        device->CreateDescriptorHeap(&dhd, IID_PPV_ARGS(&dh.m_heap));
+        dh.m_size = device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
         return dh;
     }

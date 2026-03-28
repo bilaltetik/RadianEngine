@@ -49,7 +49,7 @@ public:
         m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
         m_cmd.allocator->Reset();
         m_cmd.list->Reset(m_cmd.allocator.Get(), m_pso.Get());
-        rtvHeap = rtv.heap;
+        rtvHeap = rtv.m_heap;
     }
 
     void RenderFrame() override {
@@ -60,8 +60,8 @@ public:
         list->RSSetViewports(1, &m_viewport);
         list->RSSetScissorRects(1, &m_scissor);
 
-        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtv.heap->GetCPUDescriptorHandleForHeapStart();
-        rtvHandle.ptr += static_cast<SIZE_T>(m_frameIndex) * rtv.size;
+        D3D12_CPU_DESCRIPTOR_HANDLE rtvHandle = rtv.m_heap->GetCPUDescriptorHandleForHeapStart();
+        rtvHandle.ptr += static_cast<SIZE_T>(m_frameIndex) * rtv.m_size;
         list->OMSetRenderTargets(1, &rtvHandle, FALSE, nullptr);
 
         // [C++20] constexpr std::array — magic C dizisi yok
@@ -97,10 +97,10 @@ public:
     }
 
     [[nodiscard]] std::wstring_view GetGPUName() const noexcept override {
-        return m_gpu.name;
+        return m_gpu.m_name;
     }
     [[nodiscard]] size_t GetVRAMMB() const noexcept override {
-        return m_gpu.videoMemory / (1024 * 1024);
+        return m_gpu.m_videoMemory / (1024 * 1024);
     }
 
     ~DX12Renderer() override { Shutdown(); }
@@ -135,12 +135,12 @@ private:
     bool CreateRTV() {
         rtv = D3D12CoreHelper::CreateDescriptorHeap(m_device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 3);
 
-        CD3DX12_CPU_DESCRIPTOR_HANDLE h(rtv.heap->GetCPUDescriptorHandleForHeapStart());
+        CD3DX12_CPU_DESCRIPTOR_HANDLE h(rtv.m_heap->GetCPUDescriptorHandleForHeapStart());
         m_renderTargets.resize(3);
         for (UINT i = 0; i < 3; ++i) {
             m_swapChain->GetBuffer(i, IID_PPV_ARGS(&m_renderTargets[i]));
             m_device->CreateRenderTargetView(m_renderTargets[i].Get(), nullptr, h);
-            h.Offset(1, rtv.size);
+            h.Offset(1, rtv.m_size);
         }
 
         D3D12_DESCRIPTOR_HEAP_DESC srvDesc{};
@@ -263,7 +263,7 @@ private:
 
        diffuse = texLoader.Load(L"Texture.bmp", 0);
 
-       rtvSize = rtv.size;
+       rtvSize = rtv.m_size;
         return {};
     }
 
